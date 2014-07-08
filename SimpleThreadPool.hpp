@@ -30,6 +30,7 @@ using namespace std;
 
 OPEN_NAMESPACE_SWITCHTOOL
 
+
 typedef void SimpleThreadFunc(void);
 
 
@@ -63,11 +64,10 @@ public:
 	int	AddThread(T func)
 	{
 	    m_TMutex.lock();
-	    /* TODO 判断类型 func!=NULL
-		if (func == NULL || m_lpThread.size() >= m_nMaxPoolSize) {
+		if (m_lpThread.size() >= m_nMaxPoolSize) {
             m_TMutex.unlock();
 			return -1;
-		}*/
+		}
 
         m_lpThread.push_back(new boost::thread(func));
         m_TMutex.unlock();
