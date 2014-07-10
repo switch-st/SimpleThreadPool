@@ -3,20 +3,22 @@
 
 #include <boost/bind.hpp>
 
-#include "SimpleThreadPool.hpp"
+#include "SimpleThreadPool2.hpp"
 
 using namespace std;
 using namespace boost;
 USING_NAMESPACE_SWITCHTOOL
 
-void func1(void* p)
+double func1(void* p)
 {
     int num = *(int*)p;
     for(int i = 0; i < num * 3; ++i)
     {
         cout << "func1 : " << num << endl;
-        sleep(1);
+        //sleep(1);
     }
+
+    return 1.2;
 }
 
 void func2(void)
@@ -24,9 +26,35 @@ void func2(void)
     cout << "func2 : " << endl;
 }
 
+class A
+{
+public:
+    int fa(int num)
+    {
+        cout << "in A::fa num : " << num << endl;
+
+        return 5;
+    }
+};
+
 
 int main(int argc, char** argv)
 {
+    int num = 1;
+    int* p = &num;
+    SimpleJob< double > sj(func1, (void*)p);
+    cout << "return = " << sj.CallJob() << endl;
+
+    SimpleJob< void > sj2(func2);
+    sj2.CallJob();
+
+    A a;
+    SimpleJob< int > sj1(&A::fa, &a, 10);
+    cout << "return = " << sj1.CallJob() << endl;
+
+
+    return 0;
+
     SimpleThreadPool pool;
 
     pool.SetMaxPoolSize(10);
