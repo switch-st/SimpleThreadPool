@@ -2,18 +2,27 @@
 #define SIMPLE_THREAD_POOL_HPP
 
 /**
- * 一个简单的线程池 v0.2
+ * 一个简单的线程池 v0.3
  * 采用boost线程库
  * 线程函数须采用boost线程库编写
  * 线程函数如有参数，可使用boost::bind传入参数
  * 编译时链接libboost_thread和libboost_system
+ *
+ * 分为两种模式，函数模式和任务模式。
+ * 函数模式，为每一个传入的函数创建一个线程，函数返回则线程退出；
+ * 任务模式，将函数封装为任务，任务在线程池内排队，按顺序执行，
+ *				执行完成后，任务退出，线程等待。
  *
  * 欢迎补充！
  **/
 
 #include <list>
 #include <boost/thread.hpp>
+#include <boost/thread/condition.hpp>
 #include <boost/bind.hpp>
+#include <SimpleJob.hpp>
+#include <SimpleThreadList.hpp>
+
 
 #ifndef NAMESPACE_SWITCH_TOOL
     #define NAMESPACE_SWITCH_TOOL
@@ -25,16 +34,18 @@
 #endif
 
 
-using namespace std;
-
-
 OPEN_NAMESPACE_SWITCHTOOL
 
 
-typedef void SimpleThreadFunc(void);
+typedef float 	SIMPLE_FUNCTION_MODE;
+typedef double 	SIMPLE_JOB_MODE;
 
 
-class SimpleThreadPool
+template < typename T >
+class SimpleThreadPool;
+
+template <>
+class SimpleThreadPool < SIMPLE_FUNCTION_MODE >
 {
 public:
 	SimpleThreadPool(void)
@@ -78,7 +89,7 @@ public:
     /// 停止线程池
 	int StopThreadPool(void)
 	{
-        list< boost::thread* >::iterator iter, end;
+        std::list< boost::thread* >::iterator iter, end;
 
         end = m_lpThread.end();
         for (iter = m_lpThread.begin(); iter != end;)
@@ -130,7 +141,7 @@ public:
 private:
     void ThreadJoin(void)
     {
-        list< boost::thread* >::iterator iter, end;
+        std::list< boost::thread* >::iterator iter, end;
 
         while(1)
         {
@@ -157,17 +168,128 @@ private:
 
 private:
     boost::mutex                    m_TMutex;
-	list< boost::thread* >          m_lpThread;
+	std::list< boost::thread* >		m_lpThread;
 	boost::thread*                  m_pJoinThread;
 	unsigned int 					m_nMaxPoolSize;
 };
 
+template <>
+class SimpleThreadPool < SIMPLE_JOB_MODE >
+{
+public:
+	SimpleThreadPool(void)
+	{
+		m_oTrdList.set_thread_func(boost::bind(&SimpleThreadPool::dispatch_thread, this));
+		m_bStopFlag = false;
+	}
 
+	SimpleThreadPool(unsigned int max_thread_size, unsigned int max_job_size)
+	{
+		m_oTrdList.set_thread_func(boost::bind(&SimpleThreadPool::dispatch_thread, this));
+		m_oTrdList.set_max_thread_num(max_thread_size);
+		m_oJobList.set_max_job_num(max_job_size);
+		m_bStopFlag = false;
+	}
+
+	bool set_max_thread_size(unsigned int max)
+	{
+		return m_oTrdList.set_max_thread_num(max);
+	}
+
+	bool set_max_job_size(unsigned int max)
+	{
+		return m_oJobList.set_max_job_num(max);
+	}
+
+	int get_max_thread_size(void)
+	{
+		return m_oTrdList.get_max_thread_num();
+	}
+
+	int get_max_job_size(void)
+	{
+		return m_oJobList.get_max_job_num();
+	}
+
+	int get_current_job_num(void)
+	{
+		return m_oJobList.get_current_job_num();
+	}
+
+	bool add_job_nonblock(const SimpleJob< void >& job)
+	{
+		m_oJobList.lock_add_job();
+		bool ret = m_oJobList.push_back(job);
+		m_oJobList.unlock_add_job();
+		if (ret)
+		{
+			m_oJobList.notify_one_get_job();
+		}
+
+		return ret;
+	}
+
+	bool add_job_block(const SimpleJob< void >& job)
+	{
+		m_oJobList.lock_add_job();
+		m_oJobList.wait_add_job();
+		if (m_bStopFlag)
+		{
+			m_oJobList.unlock_add_job();
+			return false;
+		}
+		bool ret = m_oJobList.push_back(job);
+		m_oJobList.unlock_add_job();
+		if (ret)
+		{
+			m_oJobList.notify_one_get_job();
+		}
+
+		return ret;
+	}
+
+	void stop(void)
+	{
+		m_bStopFlag = true;
+		m_oJobList.stop();
+		m_oTrdList.stop();
+	}
+
+private:
+	void dispatch_thread(void)
+	{
+		SimpleJob< void > job;
+
+		while (1)
+		{
+			m_oJobList.lock_get_job();
+			m_oJobList.wait_get_job();
+			if (m_bStopFlag)
+			{
+				m_oJobList.unlock_get_job();
+				return;
+			}
+			m_oJobList.pop_front(job);
+			m_oJobList.unlock_get_job();
+			m_oJobList.notify_all_add_job();
+			job.CallJob();
+		}
+	}
+
+private:
+    boost::mutex                    m_oMutex;
+	SimpleJobList                   m_oJobList;
+	SimpleThreadList				m_oTrdList;
+	bool							m_bStopFlag;
+};
+
+
+typedef SimpleThreadPool < SIMPLE_FUNCTION_MODE >	STFPool;
+typedef SimpleThreadPool < SIMPLE_JOB_MODE >		STJPool;
+typedef SimpleJob< void >							SJob;
 
 
 CLOSE_NAMESPACE_SWITCHTOOL
-
-
 
 
 #endif // SIMPLE_THREAD_POOL_HPP
